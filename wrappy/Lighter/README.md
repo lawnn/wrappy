@@ -1,301 +1,325 @@
-# wrappy.lighter — LighterDealer
+# Lighter / wrappy 拡張 README（ws.py & LighterDealer 最新版）
 
-Lighter の売買・キャンセル・状態取得を **最小コード** で扱える薄いアダプタです。内部では Lighter SDK の High/Low レベル API、簡易レート制御、ノンス管理、バッチ送信（REST batch）をまとめています。
-
-> **ロギング**: `lighter` は **標準ライブラリ `logging`** を使用します（独自ロガーは DI で注入可）。
+`wrappy` に統合された **LighterDealer** と、WebSocketヘルパー **ws.py（`wrappy.lighter.ws`）** の実運用向けガイドです。複数Bot運用時に **config.jsonの書き換えを最小化** し、**COI（client_order_index）中心の売買制御**、**RESTバッチ送信**、**WSの自動トークン更新**、**公開トレードのLTP取得** を簡潔に組み込めます。ロギングは標準 `logging` に一本化（wrappyの Log/Notify と相互運用）。
 
 ---
 
-## 1. 導入方法（Installation）
+## 目次
 
-### 必要要件
+1. インストール / 要件
+2. 何が新しい？（要点）
+3. アーキテクチャ概要
+4. クイックスタート（最小例）
+5. API リファレンス（必要最小）
+6. 公開トレード（LTP）活用
+7. COIファースト運用とWSキャッシュ
+8. レート制限 / ネットワーク / パフォーマンス
+9. ベストプラクティス
+10. 追加サンプル集（マルチBot・バッチ・待機）
+11. 設定と上書き（config最小化・引数優先・環境変数）
+12. トラブルシューティング / FAQ
+13. テスト・検証のヒント
+14. 変更履歴（抜粋）
 
-* Python 3.11 以上推奨
-* 依存: `lighter-sdk`, `aiohttp`
+---
+
+## 1) インストール / 要件
 
 ```bash
-pip install lighter-sdk aiohttp
+pip install lighter-sdk pybotters
+# wrappy を自分のプロジェクトにインストール/参照（例）
+# pip install wrappy  または  プロジェクト内に配置
 ```
 
-> wrappy に内包して使う場合は、プロジェクトのセットアップに従ってインストールしてください（例: `pip install "wrappy[lighter]"`）。
+* Python 3.10+ を推奨
+* ネットワーク越しのREST/WSアクセスが可能であること
+* `markets.py` がある場合は、`symbol` だけ渡せば `market_index/price_scale/size_scale` を自動補完（`size_scale/base_scale` 両対応）
 
-### 位置づけ
-
-```
-wrappy/
-  └─ lighter/
-      ├─ dealer.py   # LighterDealer / DealerConfig（本READMEの対象）
-      ├─ markets.py  # 市場定義とスケール管理
-      └─ ws.py       # WebSocket ヘルパ（任意）
-```
+> 既定の logger は Python 標準 `logging`（`SafeLogger`）が利用されます。wrappy の `Log/Notify` を渡すと同じインターフェイスで動作します。
 
 ---
 
-## 2. すべてのメソッド（名前と役割）
+## 2) 何が新しい？（要点）
 
-### 2.1 DealerConfig（dataclass）
+### ws.py（`wrappy.lighter.ws`）
 
-LighterDealer の構成情報。
+* **引数だけでWS起動**：`run_overlay(...)`（`symbol`/`market_id`/`account_index`/`api_key_index`/`private_key`）
+* **config最小運用**：`run_overlay_from_config(overrides=…)` で重要情報（account/key等）だけ config に置き、残りは呼び出し引数で上書き
+* **COI-firstキャッシュ**：`orders` ストリームから `client_order_index → 注文` を保持。`filled/cancelled` は自動掃除
+* **公開トレード購読**：`run_public_trades_simple()` → `get_ltp()` / `get_recent_trades(public=True)`
+* **堅牢なトークン更新**：`Condition + version` により初回発行/更新レースを解消
+* **keepalive / 自動再接続**：指数バックオフ、`finally` クリーンアップ徹底
 
-| フィールド                  | 型             |          既定 | 役割                                                       |
-| ---------------------- | ------------- | ----------: | -------------------------------------------------------- |
-| `base_url`             | str           |           – | Lighter API ベース URL                                      |
-| `account_index`        | int           |           – | あなたの Lighter アカウント index                                 |
-| `l1_private_key`       | str           |           – | L1 秘密鍵（SDK 初期化に必要な場合あり）                                  |
-| `api_keys`             | List[Dict]    |           – | `{"api_key_index": int, "api_key_private_key": str}` の配列 |
-| `use_websocket`        | bool          |      `True` | 低レベル署名→**キュー**→`flush()` で送信（実体は REST batch）             |
-| `max_ws_batch`         | int           |        `20` | 自動 `flush` 閾値（キュー件数）                                     |
-| `standard_account`     | bool          |      `True` | 内部 RateLimiter の目安（`True` は低レート想定）                       |
-| `ip_weight_per_minute` | Optional[int] |      `None` | 内部レートを外から上書きしたい場合                                        |
-| `jitter_ms`            | (int, int)    | `(50, 150)` | 呼び出し分散の揺らぎ（ms）                                           |
-| `market_index`         | Optional[int] |         `0` | 取引銘柄 index（`symbol` 指定時は自動上書き）                           |
-| `symbol`               | Optional[str] |      `None` | シンボル指定（`markets.py` から index/scale を補完）                  |
-| `size_scale`           | Optional[int] |      `None` | 未指定時は `markets.py` で補完（`base_scale` 互換）                  |
-| `price_scale`          | Optional[int] |      `None` | 同上                                                       |
-| `prefer_high_level`    | bool          |     `False` | `True`: 高レベル API で**即時送信** / `False`: 低レベル署名→バッチ         |
+### LighterDealer
+
+* **COI専用API**：`cancel_order_by_coi()` / `update_order_by_coi()` / `feed_ws_orders()`
+* **バッチ一括**：`batch_cancel_and_create()` で複数キャンセル＋複数新規を **1回の send_tx_batch** に集約
+* **レート制限の厳格化**：`nextNonce` は `_take_nonce()` を経由し limiter で保護。`send_tx_batch`/`fetch_*` も既にカウント
+* **マーケット補完**：`symbol` 指定だけで index/scale を自動解決（`markets.py` が無い場合は明示指定）
+* **Authトークン生成はローカル署名**：レートカウント対象外
 
 ---
 
-### 2.2 LighterDealer（主要クラス）
+## 3) アーキテクチャ概要
 
-#### ライフサイクル
-
-* `@classmethod async create(cfg: DealerConfig, logger: Optional[object] = None) -> LighterDealer`
-
-  * インスタンス生成。`logger` 未指定なら `logging.getLogger("LighterDealer")` に出力。
-* `@classmethod async from_config(path: str = "config.json", symbol: str = "ETH", logger: Optional[object] = None) -> LighterDealer`
-
-  * JSON から `DealerConfig` を構築して `create()`。`{"Lighter": {...}}` セクションにも対応。
-* `async def aclose(self) -> None`
-
-  * バッチ残があれば `flush()`、Signer/Client をクローズ。`async with` で自動実行。
-* `async def __aenter__/__aexit__`
-
-  * `async with` をサポート。
-
-#### 情報取得
-
-* `async def fetch_order(self, order_id: str | int) -> Dict[str, Any]`
-
-  * 板/一覧から該当 ID をざっくり検索して返します（自注文専用 API の代替ではありません）。
-* `async def fetch_open_orders(self, market_index: Optional[int] = None) -> List[Dict[str, Any]]`
-
-  * アクティブ注文を返却。内部で **COI → order_index** マッピングを更新します。
-* `async def fetch_my_balance(self) -> Dict[str, Any] | str`
-
-  * 残高（collateral）を返します。
-* `async def fetch_my_position(self, symbol: str | None = None) -> Dict[str, Any] | Decimal | None`
-
-  * 全ポジション or 指定シンボルの符号付き数量を返します。
-
-#### 発注・キャンセル・更新
-
-* `async def create_limit_order(self, price: float, size: float, *, nonce_override: Optional[int] = None) -> Dict[str, Any]`
-
-  * 指値。`size>0`=BUY、`size<0`=SELL。`prefer_high_level=True` なら高レベルで即送信、それ以外は低レベル署名→キュー。戻り値には **`client_order_index` (COI)** を含みます。
-* `async def create_market_order(self, size: float, avg_execution_price: Optional[float] = None) -> Dict[str, Any]`
-
-  * 成行相当（IOC）。`avg_execution_price` 未指定時は片側極端価格で IOC 成功を狙います。
-* `async def cancel_order(self, order_id: str | int) -> Dict[str, Any]`
-
-  * 個別キャンセル。高レベル優先が有効ならまず高レベルを試行、失敗時は低レベルへフォールバック。
-* `async def cancel_all_orders(self) -> Dict[str, Any]`
-
-  * **全銘柄の全注文**をキャンセルします（除外指定なし版）。
-* `async def update_order(self, order_id: str | int, price: Optional[float], quantity: Optional[float], trigger_price: Optional[float] = None) -> Dict[str, Any]`
-
-  * 価格/数量/トリガー価格の変更（いずれかを指定）。低レベル署名→キュー。
-
-#### 送信・バッチ
-
-* `async def flush(self) -> Dict[str, Any]`
-
-  * キューに積んだトランザクションを **REST batch** で一括送信します。
-* `@asynccontextmanager async def batch(self, *, auto_flush: bool = True)`
-
-  * `async with dealer.batch(): ...` のブロック中は自動 `flush` を抑止。ブロック終了時に 1 回だけ `flush`（`auto_flush=False` で明示制御も可）。
-* `async def batch_cancel_and_create(self, *, cancel_order_indices: Optional[List[int | str]] = None, cancel_client_order_indices: Optional[List[int | str]] = None, new_limit_orders: Optional[List[Tuple[float, float]]] = None, fetch_if_unresolved: bool = True) -> Dict[str, Any]`
-
-  * **複数キャンセル**＋**複数新規指値**を **1 回の batch** にまとめて送信。COI 指定のキャンセルは内部で `order_index` に解決（未解決なら `fetch_open_orders()` で取得→再解決）。
-
-#### ユーティリティ
-
-* `async def get_next_nonce(self, api_key_index: Optional[int] = None) -> int`
-
-  * 指定 API キーの `next_nonce` を REST で取得します。
-
-> ※ 内部メソッド（例: `_enqueue_cancel_by_order_index`, `_enqueue_limit`）は **バッチ用ヘルパ**ですが通常は直接呼びません。`batch()` / `batch_cancel_and_create()` を利用してください。
-
----
-
-## 3. いろいろな使いかた（サンプル / Helper 含む）
-
-### 3.1 クイックスタート（明示構成）
-
-```python
-import asyncio, logging
-from wrappy import LighterDealer, DealerConfig
-
-logging.basicConfig(level=logging.INFO)
-
-cfg = DealerConfig(
-    base_url="https://mainnet.zklighter.elliot.ai",
-    account_index=123456,
-    l1_private_key="0x...",
-    api_keys=[{"api_key_index": 2, "api_key_private_key": "0x..."}],
-    symbol="ETH",              # ここから market_index / scale を自動補完
-    prefer_high_level=False,    # 低レベル署名→バッチ
-    use_websocket=True,
-    max_ws_batch=50,
-)
-
-async def main():
-    dealer = await LighterDealer.create(cfg)
-    async with dealer:
-        await dealer.create_limit_order(price=3800.05, size=+0.0001)  # BUY
-        await dealer.create_limit_order(price=4400.00, size=-0.0001)  # SELL
-        r = await dealer.flush()
-        print("batch result:", r)
-
-asyncio.run(main())
+```
+┌─────────────┐   orders/trades    ┌──────────────┐
+│  ws.WsInfo   ├──────────────────▶│  COI Cache    │
+│  (overlay)   │◀──────────────────┤  (in ws)      │
+└─────┬────────┘   token refresh   └───────┬────────┘
+      │ subscribe/ping                              │ feed_ws_orders()
+      ▼                                             ▼
+┌─────────────┐   REST batch (send_tx_batch)  ┌──────────────┐
+│  Lighter    │──────────────────────────────▶│ Lighter node │
+│  Dealer     │◀──────────────────────────────┤  (REST/WS)   │
+└─────────────┘   fetch_* / nextNonce          └──────────────┘
 ```
 
-### 3.2 `from_config`（設定ファイルから一発起動）
+* WSは **COIキャッシュ** と **LTP等の補助データ** を供給
+* Dealerは **送信の集約（バッチ）** と **レート制御** を担当
+* COI-only運用：UI/戦略は *COI* を主キーとして、必要時のみRESTで最小補完
 
-`config.json` は **トップレベル**または **`{"Lighter": {...}}` セクション**のどちらでも可。
+---
+
+## 4) クイックスタート（最小例）
+
+### 4.1 config.json を小さく（重要情報のみ）
 
 ```jsonc
-// 例1: トップレベル
-{
-  "base_url": "https://mainnet.zklighter.elliot.ai",
-  "account_index": 123456,
-  "l1_private_key": "0x...",
-  "api_keys": [{"api_key_index": 2, "api_key_private_key": "0x..."}],
-  "symbol": "ETH",
-  "use_websocket": true,
-  "prefer_high_level": false,
-  "max_ws_batch": 50
-}
-```
-
-```jsonc
-// 例2: セクション（wrappy 併用時に便利）
 {
   "Lighter": {
     "base_url": "https://mainnet.zklighter.elliot.ai",
     "account_index": 123456,
-    "l1_private_key": "0x...",
-    "api_keys": [{"api_key_index": 2, "api_key_private_key": "0x..."}],
-    "symbol": "ETH"
+    "l1_private_key": "YOUR_L1_KEY",
+    "api_keys": [
+      {"api_key_index": 2, "api_key_private_key": "YOUR_L2_API_KEY"}
+    ]
   }
 }
 ```
 
+### 4.2 WSを引数だけで起動、Dealerはconfigから（symbolは引数）
+
 ```python
 import asyncio
-from wrappy import LighterDealer
+from wrappy import LighterDealer, DealerConfig
+from wrappy.lighter.ws import WsInfo
 
 async def main():
-    dealer = await LighterDealer.from_config("config.json")
+    ws = await WsInfo.run_overlay(
+        account_index=123456,
+        api_key_index=2,
+        api_key_private_key="YOUR_L2_API_KEY",
+        symbol="ETH",  # または market_id=0
+    )
+
+    dealer = await LighterDealer.from_config("config.json", symbol="ETH")
+    ws.on_orders = dealer.feed_ws_orders  # COI→OID解決のウォームアップ
+
     async with dealer:
-        await dealer.create_limit_order(3805.0, +0.0002)
+        res = await dealer.create_limit_order(price=3000.05, size=+0.005)
+        coi = res["client_order_index"]
         await dealer.flush()
+
+        await dealer.update_order_by_coi(coi, price=2999.99, quantity=0.006)
+        await dealer.flush()
+
+        await dealer.cancel_order_by_coi(coi)
+        await dealer.flush()
+
+    await ws.aclose()
 
 asyncio.run(main())
 ```
 
-### 3.3 バッチコンテキスト（1 回だけ flush）
+---
 
-```python
-async with (await LighterDealer.from_config("config.json")) as dealer:
-    async with dealer.batch():
-        await dealer.create_limit_order(3800.0, +0.0001)
-        await dealer.create_limit_order(4399.0, -0.0001)
-    # ここで 1 回だけ flush が走る
-```
+## 5) API リファレンス（必要最小）
 
-### 3.4 複数キャンセル＋複数新規を 1 バッチで送る
+### ws.py（`wrappy.lighter.ws` → `WsInfo`）
 
-```python
-res = await dealer.batch_cancel_and_create(
-    cancel_client_order_indices=[123456789012],  # COI 指定（内部で order_index に解決）
-    cancel_order_indices=[4567, 4568],          # 直指定も可
-    new_limit_orders=[(3810.0, +0.0002), (4390.0, -0.0002)],
-)
-print(res)  # {"cancels":[...], "creates":[...], "flushed":{...}}
-```
+* `run_overlay(account_index, api_key_index, api_key_private_key, *, symbol|market_id, base_url=..., ...) -> WsInfo`
 
-### 3.5 `update_order` の活用
+  * 引数のみで口座WS購読。トークン自動更新 / keepalive / 再接続
+* `run_overlay_from_config(path="config.json", overrides=...) -> WsInfo`
 
-```python
-# 価格だけ変更
-await dealer.update_order(order_id=4567, price=3812.0, quantity=None)
+  * config重要情報 + 引数上書きで購読
+* `run_public_trades_simple(symbol|market_id, ...) -> WsInfo`
 
-# 数量だけ変更（絶対値で指定）
-await dealer.update_order(order_id=4567, price=None, quantity=0.0003)
+  * 公開トレード購読。`get_ltp()` / `get_recent_trades(public=True)`
+* `get_order_by_coi(coi)`, `wait_order_by_coi(coi, timeout)`
 
-# 価格＋数量＋トリガー価格（任意）
-await dealer.update_order(order_id=4567, price=3815.0, quantity=0.0002, trigger_price=3810.0)
-```
+  * COIキャッシュ取得 / 到着待ち
+* `on_orders`, `on_trades`, `on_public_trades`
 
-### 3.6 成行相当（IOC）
+  * 非同期/同期フック（例：`ws.on_orders = dealer.feed_ws_orders`）
+* `aclose()`
 
-```python
-# SELL（size<0）。avg_execution_price を省略すると片側極端値を使って IOC を狙います。
-await dealer.create_market_order(size=-0.0005)
-```
+  * バックグラウンドタスクの安全停止
 
-### 3.7 並列発注（TaskGroup）＋最後に flush
+### LighterDealer
+
+* 生成
+
+  * `await LighterDealer.from_config(path="config.json", symbol="ETH")`
+  * `await LighterDealer.create(DealerConfig(..., symbol="ETH"))`
+* 主要メソッド
+
+  * `create_limit_order(price, size)` / `create_market_order(size, avg_execution_price=None)`
+  * `cancel_order_by_coi(coi)` / `update_order_by_coi(coi, price=None, quantity=None, trigger_price=None)`
+  * `batch_cancel_and_create(cancel_client_order_indices=[...], new_limit_orders=[(price,size), ...])`
+  * `fetch_open_orders(market_index=None)` / `fetch_my_balance()` / `fetch_my_position(symbol=None)`
+  * `flush()` / `aclose()`
+* 補助
+
+  * `feed_ws_orders(orders)`：WSの `orders` を渡すと **COI→OID** キャッシュが温まる（`filled/cancelled` 自動掃除）
+
+> 注：`cancel_order(order_index)` / `update_order(order_index, ...)` はCOI-first運用では非推奨。COI専用APIの使用を推奨します。
+
+---
+
+## 6) 公開トレード（LTP）活用
 
 ```python
 import asyncio
+from wrappy.lighter.ws import WsInfo
 
-async with (await LighterDealer.from_config("config.json")) as dealer:
-    async def place_pair(i: int):
-        await dealer.create_limit_order(3800.0 + i, +0.0001)
-        await dealer.create_limit_order(4400.0 - i, -0.0001)
+async def main():
+    ws_pub = await WsInfo.run_public_trades_simple(symbol="ETH")
+    await asyncio.sleep(1.5)
+    print("LTP:", ws_pub.get_ltp())
+    print("Recent:", ws_pub.get_recent_trades(5, public=True))
+    await ws_pub.aclose()
 
-    async with asyncio.TaskGroup() as tg:
-        for i in range(50):
-            tg.create_task(place_pair(i))
+asyncio.run(main())
+```
 
+* `trade/<market>` の `trades` から最新価格を抽出
+* LTP更新はWSイベント駆動。RESTポーリング不要 → レート節約
+
+---
+
+## 7) COIファースト運用とWSキャッシュ
+
+* **COI（client_order_index）を主キーに**：新規時にCOIを発行し、WS `orders` 到着でCOI→注文情報をキャッシュ
+* **掃除の自動化**：`filled/cancelled/expired` で辞書から即時削除、容量は `deque(maxlen)` でO(1)エビクト
+* **待機ユーティリティ**：`wait_order_by_coi(coi, timeout=…)` でWS経由の到着を待つ
+* **Dealerとの連携**：`ws.on_orders = dealer.feed_ws_orders` を一度設定すると、RESTの `fetch_order()` を濫用せずに済む
+
+---
+
+## 8) レート制限 / ネットワーク / パフォーマンス
+
+* **カウント対象**：`send_tx_batch`、`fetch_*`、`nextNonce`（※ `_take_nonce()` で必ず limiter 経由）
+* **非対象**：Authトークン生成（`create_auth_token_with_expiry` はローカル署名）
+* 既定の `standard_account=True` は **~60 weight/min**。厳しい場合は `jitter_ms=(50,150)` の幅拡大、`max_ws_batch` を増やし `flush()` の回数を減らす
+* **同時実行の制御**：高頻度更新系は `asyncio.Semaphore` で並列度を制限。例：送信前に `await sem.acquire()` → `finally: sem.release()`
+* **丸め精度**：整数スケール変換（`price_scale/size_scale`）を前提に、丸め/切上げ/切下げの戦略を一貫させる
+
+---
+
+## 9) ベストプラクティス
+
+* **COI-first**：RESTの `fetch_order()` は最後の手段。WSキャッシュを優先
+* **markets.pyの自動補完**：`symbol` 指定 → index/scale 自動解決。無い環境では `DealerConfig` に `price_scale/size_scale` を明示
+* **バッチ送信の活用**：`async with dealer.batch(): ...` で明示的にフラッシュタイミングを制御
+* **公開トレードでLTP**：価格参照はWSで取得し、RESTコールを削減
+* **キー管理**：APIキーは環境変数や秘密管理を使用し、configへの直書きを避ける
+
+---
+
+## 10) 追加サンプル集
+
+### 10.1 まとめてキャンセル＋新規を1バッチで
+
+```python
+result = await dealer.batch_cancel_and_create(
+    cancel_client_order_indices=[coi1, coi2],
+    new_limit_orders=[(3123.45, +0.005), (3650.00, -0.005)],
+)
+print(result)
+```
+
+### 10.2 バッチコンテキスト（明示フラッシュ）
+
+```python
+async with dealer.batch():
+    await dealer._enqueue_limit(3001.0, +0.005)
+    await dealer._enqueue_limit(2998.0, -0.005)
+# ここで自動 flush()
+```
+
+### 10.3 COIの到着待ち → 更新 → キャンセル
+
+```python
+o = await ws.wait_order_by_coi(coi, timeout=2.0)
+if o:
+    await dealer.update_order_by_coi(coi, price=3002.0, quantity=0.004)
+    await dealer.flush()
+    await dealer.cancel_order_by_coi(coi)
     await dealer.flush()
 ```
 
-### 3.8 QPS を概ね守る（簡易スロットリング）
+### 10.4 マルチBot（config共通・引数差替え）
 
 ```python
-import time
-
-qps = 5
-interval = 1.0 / qps
-next_at = time.monotonic()
-
-for _ in range(30):
-    await dealer.create_limit_order(999999.0, -0.0001)
-    next_at += interval
-    await asyncio.sleep(max(0.0, next_at - time.monotonic()))
-
-await dealer.flush()
+symbols = ["ETH", "BTC", "SOL"]
+for sym in symbols:
+    ws = await WsInfo.run_overlay(account_index=ACC, api_key_index=KI, api_key_private_key=KEY, symbol=sym)
+    dealer = await LighterDealer.from_config("config.json", symbol=sym)
+    ws.on_orders = dealer.feed_ws_orders
+    # 各Bot専用の戦略タスクを起動...
 ```
 
 ---
 
-## ベストプラクティス & 注意事項
+## 11) 設定と上書き（config最小化・引数優先・環境変数）
 
-* **レート制御**: `standard_account=True` のとき内部 RateLimiter は保守的（目安）。外側でも `Semaphore` / `TaskGroup` 等で並列度を制限してください。
-* **スケール補完**: `price_scale` / `size_scale` 未指定時は `markets.py` から補完。桁ズレが生じる場合は `markets.py` を更新。
-* **期限系**: 指値は通常 `order_expiry` を付けません。IOC（成行相当）は短い期限設定。
-* **COI 解決**: COI→order_index の解決は `fetch_open_orders()` 実行時に内部キャッシュを更新します。
-* **ログ**: 既定で `logging.getLogger("LighterDealer")` に出力。必要に応じて `logging.basicConfig` やハンドラを設定。
+* **基本方針**：configは *重要情報のみ*（`base_url` / `account_index` / `l1_private_key` / `api_keys`）。`symbol` や `market_id` は **引数で渡す**
+* **環境変数例**：
 
-## 代表的なエラーとヒント
+```bash
+export LIGHTER_BASE_URL=https://mainnet.zklighter.elliot.ai
+export LIGHTER_ACCOUNT_INDEX=123456
+export LIGHTER_L1_KEY=...
+export LIGHTER_API_KEY_INDEX=2
+export LIGHTER_API_KEY=...
+```
 
-* `invalid expiry`: 期限設定が長すぎる/過ぎている。limit では期限を付けない、IOC は短め。
-* `unsupported tx type: for batch operation`: SDK とサーバの型ズレ。Signer の定数を参照し正しく署名。
-* **桁ズレ**: `price_scale` / `size_scale` が未対応。`markets.py` を更新。
-* **常に即送信される**: `prefer_high_level=True` のまま。バッチしたい場合は `False` に。
+* **読み込みヒント**：自前で `os.getenv()` → `DealerConfig` へ流し込むか、`from_config()` を使ってから上書き
 
 ---
 
-**Happy hacking & safe trading!**
+## 12) トラブルシューティング / FAQ
+
+**Q. `order_not_found_by_coi` が出る**
+A. WSキャッシュ未同期の可能性。`ws.on_orders = dealer.feed_ws_orders` を設定、もしくは起動直後に1回だけ `fetch_open_orders()` でウォームアップ。
+
+**Q. `price_scale/size_scale が None` エラー**
+A. `markets.py` が無い/未対応。`DealerConfig` に `price_scale/size_scale` を明示するか、`symbol` をサポートする `markets.py` を配置。
+
+**Q. HTTP 429（レート制限）**
+A. `jitter_ms` を広げる、`max_ws_batch` を増やす、`flush()` の頻度を落とす、`standard_account=False` を検討。
+
+**Q. WSが時々切れる**
+A. 既定で指数バックオフ再接続＆keepaliveを送信。プロキシやFWのアイドルタイムアウトがある場合、`ping_interval` を短く。
+
+---
+
+## 13) テスト・検証のヒント
+
+* **ドライラン**：`prefer_high_level=True` にしてSDK経由の高レベル呼び出し挙動を確認
+* **送信の可視化**：`logging.getLogger("LighterDealer.tx").setLevel(logging.DEBUG)` でシリアライズ前プレビュー
+* **WSの疑似入力**：`ws.on_orders` にテスト用の `orders` 配列を流し、COIキャッシュの掃除/更新を検証
+* **丸め誤差テスト**：`price_scale/size_scale` が極端に大きい/小さいケースで数量/価格変換の境界をチェック
+
+---
+
+## 14) 変更履歴（抜粋）
+
+* ws.py: 公開トレード購読とLTP追加、トークン待機のレース解消、COIキャッシュ掃除、指数バックオフ、finallyクリーンアップ
+* Dealer: COI専用API追加、`nextNonce` の limiter 統一、バッチAPIの整備、markets補完のログ整備、SafeLoggerの標準化
+
+---
+
+> 本READMEは実運用の観点から **レート制限の回避・COI-first設計・バッチ送信** を重視しています。必要に応じて、最小サンプルを自分の戦略骨格（エントリー/エグジット/リスク管理）に貼り付け、WSキャッシュとDealerのフックを接続するだけで、すぐに検証を始められます。
