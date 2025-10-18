@@ -179,7 +179,7 @@ class NoncePool:
 
 
 class LighterDealer(DealerBase):
-    WEIGHT_SEND = 6
+    WEIGHT_SEND = 1
 
     def __init__(self, config: DealerConfig, logger, client: "lighter.ApiClient"):
         super().__init__(config, logger)
