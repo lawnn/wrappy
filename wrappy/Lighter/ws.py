@@ -135,8 +135,9 @@ class LighterWsTokenManager:
         self.account_index = account_index
         self.api_key_index = api_key_index
         self.api_key_private_key = api_key_private_key
-        self.renew_leeway_sec = max(0, renew_leeway_sec)
+        self.renew_leeway_sec = max(0, min(renew_leeway_sec, 540))  # clamp to <= 9min
         self.jitter_sec = jitter_sec
+        self.min_refresh_interval_sec = 60  # don't refresh more often than 60s
         self.log = logger or logging.getLogger("LighterWsTokenManager")
 
         self._signer: Optional[lighter.SignerClient] = None
@@ -236,9 +237,11 @@ class LighterWsTokenManager:
     async def _refresh_loop(self) -> None:
         while not self._closed:
             now = time.time()
-            target = (self._expires_at_epoch or int(now) + 480) - self.renew_leeway_sec
+            base_exp = (self._expires_at_epoch or int(now) + 600)
+            # refresh a bit EARLY and subtract jitter to spread clients
             jitter = random.uniform(self.jitter_sec[0], self.jitter_sec[1])
-            sleep_for = max(1.0, target - now + jitter)
+            target = base_exp - self.renew_leeway_sec - jitter
+            sleep_for = max(self.min_refresh_interval_sec, target - now)
             try:
                 await asyncio.sleep(sleep_for)
                 await self._issue_new_token()
@@ -256,13 +259,17 @@ class LighterWsTokenManager:
         if err:
             raise RuntimeError(f"failed to create auth token: {err}")
 
-        async with self._tok_lock:
+        # Use the Condition as its own lock and notify waiters atomically
+        async with self._tok_cond:
             self._token = token
             self._expires_at_epoch = int(time.time()) + 600
             self._tok_version += 1
             self._tok_cond.notify_all()
+
         ttl = (self._expires_at_epoch or 0) - int(time.time())
-        logging.getLogger("LighterWsTokenManager").debug(f"WS auth token issued (~{ttl}s valid)")
+        logging.getLogger("LighterWsTokenManager").debug(
+            f"WS auth token issued (~{ttl}s valid)"
+        )
 
 
 # -------------------------
@@ -530,10 +537,10 @@ class WsInfo:
 
                         async def resubscribe_with_latest_token() -> None:
                             nonlocal last_ver
-                            latest = await auth.wait_for_refresh(timeout=10.0, since=last_ver)
-                            if not latest:
-                                log.warning("token refresh awaited but still None")
-                                return
+                            # Block until a newer token is available; no timeout to avoid noisy warnings
+                            latest = await auth.wait_for_refresh(since=last_ver)
+                            if latest is None:
+                                return  # likely shutdown/cancel; exit quietly
                             last_ver = auth.version
                             try:
                                 async with send_lock:
