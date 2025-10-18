@@ -368,6 +368,10 @@ class WsInfo:
                   name="lighter_ws_public_trades")
         return ws
 
+    async def run_public_trades(self, symbol: str, ping_interval: float = 25.0) -> None:
+        mid = _resolve_market_index_from_any(symbol=symbol)
+        await self._public_trades_loop(market_id=mid, ping_interval=ping_interval)
+
     # ---------- convenience (config.json with overrides) ----------
     @classmethod
     async def run_overlay_from_config(
@@ -427,10 +431,6 @@ class WsInfo:
         ws._spawn(ws._public_trades_loop(market_id=mid, ping_interval=ping_interval),
                   name="lighter_ws_public_trades")
         return ws
-
-
-    async def run_public_trades(self, market_id: int, ping_interval: float = 25.0) -> None:
-        await self._public_trades_loop(market_id=market_id, ping_interval=ping_interval)
 
     # ---------- lightweight snapshot APIs ----------
     def get_ltp(self) -> Optional[Decimal]:
