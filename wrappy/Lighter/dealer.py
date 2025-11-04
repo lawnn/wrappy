@@ -817,6 +817,11 @@ class LighterDealer(DealerBase):
             self._signers[api_key_index] = s
         return s
 
+    def get_market_info(self, symbol: str, index: bool = True) -> int:
+        if index:
+            return mkt.find_by_symbol(str(symbol)).get("index", None)
+        return mkt.find_by_symbol(str(symbol))
+
     def _ensure_market_index(self):
         # symbol が指定されていれば優先的に market_index を上書き
         if self.config.symbol and mkt:
