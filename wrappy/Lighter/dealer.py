@@ -315,9 +315,9 @@ class LighterDealer(DealerBase):
         params = {
             "account_index": str(self.config.account_index),
         }
-        # サーバ側が market_index フィルタをサポートしているなら付ける（任意）
+        # サーバ側が market_id フィルタをサポートしているなら付ける（任意）
         if market_index is not None:
-            params["market_index"] = str(int(market_index))
+            params["market_id"] = str(int(market_index))
         else:
             params["market_id"] = str(int(self.config.market_index))
         params.setdefault("auth", auth)
