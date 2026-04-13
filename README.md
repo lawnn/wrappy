@@ -11,6 +11,8 @@ The repository currently supports:
 
 This README is intentionally narrow: it documents only the APIs that exist in this repository today.
 
+For machine-oriented repository context, see [LLM_REPO_GUIDE.md](LLM_REPO_GUIDE.md).
+
 ## Installation
 
 Core package:
