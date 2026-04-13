@@ -154,6 +154,12 @@ The repository includes smoke tests aimed at package usability:
 python scripts/verify_agent_ready.py
 ```
 
+Convenience alias:
+
+```bash
+make agent-check
+```
+
 ## Known Limits
 
 - Exchange APIs are third-party systems and can still change underneath this package

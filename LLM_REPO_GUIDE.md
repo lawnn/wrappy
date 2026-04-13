@@ -107,6 +107,7 @@ Additional keys by adapter:
 - `BitFlyer` cancel endpoints propagating HTTP failures
 - `BitFlyer.fetch_my_position()` decimal aggregation behavior
 - single-command repository verification via `scripts/verify_agent_ready.py`
+- documentation and export contract checks for `README.md`, `AGENTS.md`, and `LLM_REPO_GUIDE.md`
 
 ## When Modifying This Repo
 

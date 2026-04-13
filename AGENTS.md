@@ -19,6 +19,12 @@ Run this before considering changes complete:
 python scripts/verify_agent_ready.py
 ```
 
+This command verifies:
+
+- source-tree bytecode compilation
+- tracked agent regression tests
+- local install smoke from a temporary target directory
+
 ## Public API Rules
 
 - Preferred exchange imports:

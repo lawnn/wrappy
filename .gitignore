@@ -132,6 +132,8 @@ dmypy.json
 tests/*
 !tests/agent/
 !tests/agent/**
+tests/agent/__pycache__/
+tests/agent/*.pyc
 .idea/
 apis.json
 
