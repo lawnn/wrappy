@@ -103,6 +103,9 @@ Additional keys by adapter:
 - `BitBank._requests()` notification on server error
 - `BitBank` API key rotation when `bitbank_keys` is configured
 - `CoinCheck.fetch_ticker()` retry and failure behavior
+- `GMO._requests()` success parsing and fallback error formatting
+- `BitFlyer` cancel endpoints propagating HTTP failures
+- `BitFlyer.fetch_my_position()` decimal aggregation behavior
 
 ## When Modifying This Repo
 

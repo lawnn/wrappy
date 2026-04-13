@@ -23,8 +23,13 @@ class GMO(BotBase):
                 raise RequestException(f"[{r.status}] server error")
             data = await r.json()
             if not data['status'] == 0:
-                err_code = data['messages'][0]['message_code']
-                err_msg = str(data['messages'][0]['message_string'])
+                messages = data.get("messages") or []
+                if messages:
+                    err_code = messages[0].get('message_code', 'UNKNOWN')
+                    err_msg = str(messages[0].get('message_string', data))
+                else:
+                    err_code = data.get("status", "UNKNOWN")
+                    err_msg = str(data)
                 raise RequestException(f"[Error code] {err_code} [Error msg] {err_msg}")
             else:
                 if "data" in data:

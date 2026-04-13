@@ -64,6 +64,13 @@ class bitflyer(BotBase):
         async with pybotters.Client(apis=self.key, base_url='https://api.bitflyer.com') as client:
             return await client.request(method, url=url, params=params, data=data)
 
+    async def _response_json(self, response):
+        if not str(response.status).startswith('2'):
+            if str(response.status).startswith("4"):
+                raise RequestException(f"{response.status} Error {await response.json()}")
+            raise RequestException(f"{response.status} Internal Server Error")
+        return await response.json()
+
 
     async def _replace_order(self, side: str, size: Union[float, int, Decimal], order_type: str, price: any = None,
                              minute_to_expire: int = 43200, time_in_force: str = "GTC"):
@@ -84,12 +91,7 @@ class bitflyer(BotBase):
         self.api_call_count_from_private += 1
         self.api_call_count_from_order += 1
 
-        if not str(response.status).startswith('2'):
-            if str(response.status).startswith("4"):
-                raise RequestException(f"{response.status} Error {await response.json()}")
-            else:
-                raise RequestException(f"{response.status} Internal Server Error")
-        return  await response.json()
+        return await self._response_json(response)
 
 
     async def market_order(self, side: Literal["BUY", "SELL"], size: Union[float, int, Decimal]) -> dict:
@@ -124,7 +126,8 @@ class bitflyer(BotBase):
             "child_order_acceptance_id": child_order_acceptance_id
         }
 
-        await self._requests('POST', url="/v1/me/cancelchildorder", data=data)
+        response = await self._requests('POST', url="/v1/me/cancelchildorder", data=data)
+        await self._response_json(response)
 
         self.api_call_count_from_private += 1
 
@@ -137,7 +140,8 @@ class bitflyer(BotBase):
             "product_code": self.symbol,
         }
 
-        await self._requests('POST', url="/v1/me/cancelallchildorders", data=data)
+        response = await self._requests('POST', url="/v1/me/cancelallchildorders", data=data)
+        await self._response_json(response)
 
         self.api_call_count_from_private += 1
         self.api_call_count_from_order += 1
@@ -146,12 +150,7 @@ class bitflyer(BotBase):
     async def _fetch_position(self):
         response = await self._requests("GET", url="/v1/me/getpositions", params={"product_code": self.symbol})
         self.api_call_count_from_private += 1
-        if not str(response.status).startswith('2'):
-            if str(response.status).startswith("4"):
-                raise RequestException(f"{response.status} Error {await response.json()}")
-            else:
-                raise RequestException(f"{response.status} Internal Server Error")
-        return  await response.json()
+        return await self._response_json(response)
 
 
     async def fetch_my_position(self) -> dict:
