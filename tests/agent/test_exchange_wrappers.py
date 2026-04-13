@@ -101,6 +101,50 @@ class BitBankRequestTest(_ConfigMixin, unittest.IsolatedAsyncioTestCase):
         self.assertEqual(factory.calls[0]["apis"], {"bitbank": keys[0]})
         self.assertEqual(factory.calls[1]["apis"], {"bitbank": keys[1]})
 
+    async def test_market_and_spot_orders_build_expected_payloads(self):
+        config_path = self.make_config_path(
+            {
+                "exchange_name": "bitbank",
+                "bot_name": "agent",
+                "log_dir": "log",
+                "bitbank": ["KEY", "SECRET"],
+            }
+        )
+        bot = BitBank(config_path, "btc_jpy")
+        bot._requests = AsyncMock(return_value={"ok": True})
+
+        await bot.market_order("buy", "0.1")
+        await bot.spot_market_order("sell", "0.2")
+
+        first_call = bot._requests.await_args_list[0]
+        second_call = bot._requests.await_args_list[1]
+
+        self.assertEqual(first_call.args, ("POST",))
+        self.assertEqual(first_call.kwargs["url"], "/user/spot/order")
+        self.assertEqual(
+            first_call.kwargs["data"],
+            {
+                "pair": "btc_jpy",
+                "amount": "0.1",
+                "side": "buy",
+                "position_side": "long",
+                "type": "market",
+                "post_only": False,
+            },
+        )
+
+        self.assertEqual(second_call.kwargs["url"], "/user/spot/order")
+        self.assertEqual(
+            second_call.kwargs["data"],
+            {
+                "pair": "btc_jpy",
+                "amount": "0.2",
+                "side": "sell",
+                "type": "market",
+                "post_only": False,
+            },
+        )
+
 
 class CoinCheckTest(_ConfigMixin, unittest.IsolatedAsyncioTestCase):
     async def test_fetch_ticker_retries_then_returns(self):
@@ -181,6 +225,79 @@ class GMOTest(_ConfigMixin, unittest.IsolatedAsyncioTestCase):
 
         self.assertIn("[Error code] 7", str(ctx.exception))
 
+    async def test_order_methods_compact_none_fields_and_route_to_expected_endpoints(self):
+        config_path = self.make_config_path(
+            {
+                "exchange_name": "gmo",
+                "bot_name": "agent",
+                "log_dir": "log",
+                "gmocoin": ["KEY", "SECRET"],
+            }
+        )
+        bot = GMO(config_path, "BTC_JPY")
+        bot._requests = AsyncMock(return_value={"ok": True})
+
+        await bot.market_order("BUY", "0.01")
+        await bot.limit_order("SELL", "0.02", 123456, losscut_price="120000")
+        await bot.settle_limit("BUY", "0.03", 120000, 42)
+        await bot.cancel_all_orders()
+        await bot.edit_order(10, 999999)
+
+        market_call = bot._requests.await_args_list[0]
+        limit_call = bot._requests.await_args_list[1]
+        settle_call = bot._requests.await_args_list[2]
+        cancel_all_call = bot._requests.await_args_list[3]
+        edit_call = bot._requests.await_args_list[4]
+
+        self.assertEqual(market_call.args, ("POST",))
+        self.assertEqual(market_call.kwargs["url"], "/private/v1/order")
+        self.assertEqual(
+            market_call.kwargs["data"],
+            {
+                "symbol": "BTC_JPY",
+                "side": "BUY",
+                "executionType": "MARKET",
+                "cancelBefore": False,
+                "size": "0.01",
+            },
+        )
+
+        self.assertEqual(limit_call.kwargs["url"], "/private/v1/order")
+        self.assertEqual(
+            limit_call.kwargs["data"],
+            {
+                "symbol": "BTC_JPY",
+                "side": "SELL",
+                "executionType": "LIMIT",
+                "losscutPrice": "120000",
+                "cancelBefore": False,
+                "size": "0.02",
+                "price": "123456",
+            },
+        )
+
+        self.assertEqual(settle_call.kwargs["url"], "/private/v1/closeOrder")
+        self.assertEqual(
+            settle_call.kwargs["data"],
+            {
+                "symbol": "BTC_JPY",
+                "side": "BUY",
+                "executionType": "LIMIT",
+                "cancelBefore": False,
+                "settlePosition": [{"positionId": 42, "size": "0.03"}],
+                "price": "120000",
+            },
+        )
+
+        self.assertEqual(
+            cancel_all_call.kwargs["data"],
+            {"symbols": ["BTC_JPY"]},
+        )
+        self.assertEqual(
+            edit_call.kwargs["data"],
+            {"orderId": 10, "price": 999999},
+        )
+
 
 class BitFlyerTest(_ConfigMixin, unittest.IsolatedAsyncioTestCase):
     async def test_cancel_order_raises_on_http_error(self):
@@ -242,6 +359,58 @@ class BitFlyerTest(_ConfigMixin, unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(position["side"], "BUY")
         self.assertEqual(str(position["size"]), "0.03")
+
+    async def test_order_methods_build_expected_payloads(self):
+        config_path = self.make_config_path(
+            {
+                "exchange_name": "bitflyer",
+                "bot_name": "agent",
+                "log_dir": "log",
+                "bitflyer": ["KEY", "SECRET"],
+            }
+        )
+        bot = BitFlyer(config_path, "FX_BTC_JPY")
+
+        bot._requests = AsyncMock(
+            side_effect=[
+                _DummyResponse(200, {"child_order_acceptance_id": "A"}),
+                _DummyResponse(200, {"child_order_acceptance_id": "B"}),
+            ]
+        )
+
+        await bot.market_order("BUY", 0.01)
+        await bot.limit_order("SELL", 0.02, 123456, minute_to_expire=60, time_in_force="IOC")
+
+        market_call = bot._requests.await_args_list[0]
+        limit_call = bot._requests.await_args_list[1]
+
+        self.assertEqual(market_call.args, ("POST",))
+        self.assertEqual(market_call.kwargs["url"], "/v1/me/sendchildorder")
+        self.assertEqual(
+            market_call.kwargs["data"],
+            {
+                "product_code": "FX_BTC_JPY",
+                "child_order_type": "MARKET",
+                "side": "BUY",
+                "size": 0.01,
+                "minute_to_expire": 43200,
+                "time_in_force": "GTC",
+            },
+        )
+
+        self.assertEqual(limit_call.kwargs["url"], "/v1/me/sendchildorder")
+        self.assertEqual(
+            limit_call.kwargs["data"],
+            {
+                "product_code": "FX_BTC_JPY",
+                "child_order_type": "LIMIT",
+                "side": "SELL",
+                "size": 0.02,
+                "minute_to_expire": 60,
+                "time_in_force": "IOC",
+                "price": 123456,
+            },
+        )
 
 
 if __name__ == "__main__":

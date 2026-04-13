@@ -7,6 +7,10 @@ from .time_util import now_jst
 from .base import BotBase
 from .exceptions import RequestException
 
+
+def _compact_payload(payload: dict) -> dict:
+    return {key: value for key, value in payload.items() if value is not None}
+
 class GMO(BotBase):
     def __init__(self, config: str, symbol: str):
         super().__init__(config)
@@ -401,7 +405,7 @@ class GMO(BotBase):
         if (order_type == 'LIMIT') or (order_type == 'STOP'):
             data['price'] = str(price)
 
-        return await self._requests('POST', url=url, data=data)
+        return await self._requests('POST', url=url, data=_compact_payload(data))
 
     async def market_order(self, side: Literal["BUY", "SELL"], size: Union[float, int, Decimal],
                            timeInForce: Literal["FAK", "FAS", "FOK", "SOK"] = None,
@@ -575,7 +579,7 @@ class GMO(BotBase):
         :return: [637000,637002]
         """
         return await self._requests('POST', '/private/v1/cancelBulkOrder',
-                                   data={"symbols": [self.symbol], "side": side, "settleType": settleType, "desc": desc})
+                                   data=_compact_payload({"symbols": [self.symbol], "side": side, "settleType": settleType, "desc": desc}))
 
     async def edit_order(self, orderId: int, price: Union[int,float], losscutPrice: Union[int,float] = None):
         """
@@ -590,7 +594,7 @@ class GMO(BotBase):
         }
         """
         return await self._requests('POST', '/private/v1/changeOrder',
-                                    data={"orderId": orderId, "price": price, "losscutPrice": losscutPrice})
+                                    data=_compact_payload({"orderId": orderId, "price": price, "losscutPrice": losscutPrice}))
 
     async def historical(self, symbol: str, interval: str, date: str):
         return await self._requests('GET', f'/public/v1/klines',

@@ -6,6 +6,10 @@ from .base import BotBase
 from .exceptions import APIException, RequestException
 
 
+def _compact_payload(payload: dict) -> dict:
+    return {key: value for key, value in payload.items() if value is not None}
+
+
 class BitBank(BotBase):
     def __init__(self, config: str, symbol: str):
         super().__init__(config)
@@ -118,7 +122,7 @@ class BitBank(BotBase):
         if order_type == "stop" or order_type == "stop_limit":
             request["trigger_price"] = str(trigger_price)
 
-        return await self._requests('POST', url="/user/spot/order", data=request)
+        return await self._requests('POST', url="/user/spot/order", data=_compact_payload(request))
 
     async def market_order(self, side: Literal['buy', 'sell'], size: Union[float, int, Decimal]) -> dict:
         """

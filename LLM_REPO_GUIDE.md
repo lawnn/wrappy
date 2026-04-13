@@ -102,10 +102,13 @@ Additional keys by adapter:
 - Logger initialization even when root logging already has handlers
 - `BitBank._requests()` notification on server error
 - `BitBank` API key rotation when `bitbank_keys` is configured
+- `BitBank` margin and spot order payload shapes
 - `CoinCheck.fetch_ticker()` retry and failure behavior
 - `GMO._requests()` success parsing and fallback error formatting
+- `GMO` order, settle, bulk cancel, and edit payload compaction
 - `BitFlyer` cancel endpoints propagating HTTP failures
 - `BitFlyer.fetch_my_position()` decimal aggregation behavior
+- `BitFlyer` market and limit order payload shapes
 - single-command repository verification via `scripts/verify_agent_ready.py`
 - documentation and export contract checks for `README.md`, `AGENTS.md`, and `LLM_REPO_GUIDE.md`
 
