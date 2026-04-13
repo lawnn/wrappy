@@ -26,9 +26,9 @@
 ## 1) インストール / 要件
 
 ```bash
-pip install lighter-sdk pybotters
-# wrappy を自分のプロジェクトにインストール/参照（例）
-# pip install wrappy  または  プロジェクト内に配置
+pip install -U "wrappy[lighter] @ git+https://github.com/lawnn/wrappy.git"
+# Lighter と分析系もまとめて使うなら:
+# pip install -U "wrappy[full] @ git+https://github.com/lawnn/wrappy.git"
 ```
 
 * Python 3.10+ を推奨

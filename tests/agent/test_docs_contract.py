@@ -15,6 +15,13 @@ class DocsContractTest(unittest.TestCase):
             text = (ROOT / rel_path).read_text(encoding="utf-8")
             self.assertIn(expected, text, rel_path)
 
+    def test_full_extra_install_path_is_documented(self):
+        expected = 'wrappy[full]'
+
+        for rel_path in ["README.md", "LLM_REPO_GUIDE.md", "wrappy/Lighter/README.md"]:
+            text = (ROOT / rel_path).read_text(encoding="utf-8")
+            self.assertIn(expected, text, rel_path)
+
     def test_documented_public_api_names_resolve(self):
         names = [
             "Log",

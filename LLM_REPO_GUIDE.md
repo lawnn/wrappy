@@ -16,6 +16,9 @@ optional_dependencies:
   analytics:
     packages: ["numpy", "pandas", "polars", "matplotlib", "pytz"]
     install: "pip install 'wrappy[analytics]'"
+  full:
+    includes: ["lighter", "analytics"]
+    install: "pip install 'wrappy[full]'"
 validation:
   - "python scripts/verify_agent_ready.py"
 ```
@@ -81,6 +84,7 @@ Additional keys by adapter:
 - Read `AGENTS.md` first when operating as a coding agent.
 - Do not assume Lighter support is installed. Check for `lighter-sdk` if using `wrappy.lighter`.
 - Do not assume analytics dependencies are installed just because `wrappy` imports successfully.
+- If both optional feature sets are needed, `wrappy[full]` is the supported combined install path.
 - Prefer README examples that use `limit_order`, not undocumented methods.
 - Treat files under `tests/agent/` as the current tracked smoke and regression suite.
 - Treat files under `tests/` outside `tests/agent/` as local examples or ad hoc scripts, not canonical automated tests.

@@ -56,6 +56,14 @@ pip install -U "wrappy[lighter] @ git+https://github.com/lawnn/wrappy.git"
 pip install -U "wrappy[analytics] @ git+https://github.com/lawnn/wrappy.git"
 ```
 
+Lighter と分析ユーティリティをまとめて使う場合:
+
+```bash
+pip install -U "wrappy[full] @ git+https://github.com/lawnn/wrappy.git"
+```
+
+`full` は `lighter` と `analytics` をまとめた extras です。
+
 ## import の考え方
 
 `wrappy` は、オプション依存が入っていなくてもトップレベル import が壊れないようにしてあります。
@@ -298,4 +306,5 @@ make agent-check
 - 取引所 API は外部サービスなので、将来仕様変更される可能性があります。
 - Lighter を使うには `lighter-sdk` が必要です。
 - 分析関数を使うには `analytics` extra が必要です。
+- 両方まとめて入れるなら `full` extra が使えます。
 - README にある例は「入口としての最小例」です。実運用では例外処理、レート制限、ポジション管理を別途検討してください。
