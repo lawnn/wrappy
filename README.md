@@ -12,6 +12,7 @@ The repository currently supports:
 This README is intentionally narrow: it documents only the APIs that exist in this repository today.
 
 For machine-oriented repository context, see [LLM_REPO_GUIDE.md](LLM_REPO_GUIDE.md).
+For agent operating rules, see [AGENTS.md](AGENTS.md).
 
 ## Installation
 
@@ -150,7 +151,7 @@ Stable exports from `wrappy.lighter`:
 The repository includes smoke tests aimed at package usability:
 
 ```bash
-python -m unittest discover -s tests/agent -v
+python scripts/verify_agent_ready.py
 ```
 
 ## Known Limits

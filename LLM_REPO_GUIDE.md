@@ -17,8 +17,7 @@ optional_dependencies:
     packages: ["numpy", "pandas", "polars", "matplotlib", "pytz"]
     install: "pip install 'wrappy[analytics]'"
 validation:
-  - "python -m unittest discover -s tests/agent -v"
-  - "python -m compileall wrappy tests/agent"
+  - "python scripts/verify_agent_ready.py"
 ```
 
 ## What Exists
@@ -79,6 +78,7 @@ Additional keys by adapter:
 
 ## Safe Usage Guidance For Agents
 
+- Read `AGENTS.md` first when operating as a coding agent.
 - Do not assume Lighter support is installed. Check for `lighter-sdk` if using `wrappy.lighter`.
 - Do not assume analytics dependencies are installed just because `wrappy` imports successfully.
 - Prefer README examples that use `limit_order`, not undocumented methods.
@@ -106,6 +106,7 @@ Additional keys by adapter:
 - `GMO._requests()` success parsing and fallback error formatting
 - `BitFlyer` cancel endpoints propagating HTTP failures
 - `BitFlyer.fetch_my_position()` decimal aggregation behavior
+- single-command repository verification via `scripts/verify_agent_ready.py`
 
 ## When Modifying This Repo
 
