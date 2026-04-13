@@ -1,52 +1,93 @@
 # wrappy
 
-`wrappy` is an async helper library for crypto trading bots.
+`wrappy` は、暗号資産 bot を作るときに毎回書きがちな処理をまとめた非同期 Python ライブラリです。
 
-The repository currently supports:
+たとえば次のような用途を想定しています。
 
-- Common bot infrastructure: `Log`, `Notify`, `BotBase`
-- Exchange wrappers: `GMO`, `BitBank`, `BitFlyer`, `CoinCheck`
-- Optional Lighter integration: `wrappy.lighter`
-- Optional analytics helpers in `wrappy.util`
+- bot 共通のログ出力
+- Discord / LINE への通知
+- GMO / BitBank / BitFlyer / CoinCheck の API ラッパー
+- Lighter 向けの補助機能
+- bot 開発時に使う一部の分析ユーティリティ
 
-This README is intentionally narrow: it documents only the APIs that exist in this repository today.
+## まず最初に読む場所
 
-For machine-oriented repository context, see [LLM_REPO_GUIDE.md](LLM_REPO_GUIDE.md).
-For agent operating rules, see [AGENTS.md](AGENTS.md).
+人間向けの概要と使い方:
 
-## Installation
+- この `README.md`
 
-Core package:
+LLM に読ませるためのリポジトリ要約:
+
+- [LLM_REPO_GUIDE.md](LLM_REPO_GUIDE.md)
+
+AI コーディングエージェント向けの運用ルール:
+
+- [AGENTS.md](AGENTS.md)
+
+AI エージェントにこのリポジトリを触らせる場合は、少なくとも `LLM_REPO_GUIDE.md` と `AGENTS.md` を先に読ませるのが安全です。
+
+## このリポジトリで現在サポートしているもの
+
+- 共通基盤: `Log`, `Notify`, `BotBase`
+- 取引所ラッパー: `GMO`, `BitBank`, `BitFlyer`, `CoinCheck`
+- オプション機能:
+  - `wrappy.lighter`
+  - `wrappy.util` の分析用関数
+
+この README では、実際にこのリポジトリに存在する API だけを説明します。
+
+## インストール
+
+コア機能だけ使う場合:
 
 ```bash
 pip install -U git+https://github.com/lawnn/wrappy.git
 ```
 
-With Lighter support:
+Lighter も使う場合:
 
 ```bash
 pip install -U "wrappy[lighter] @ git+https://github.com/lawnn/wrappy.git"
 ```
 
-With analytics helpers:
+分析ユーティリティも使う場合:
 
 ```bash
 pip install -U "wrappy[analytics] @ git+https://github.com/lawnn/wrappy.git"
 ```
 
-## Agent-Friendly Import Rules
+## import の考え方
 
-The package is designed so that `import wrappy` works even if optional dependencies are not installed.
+`wrappy` は、オプション依存が入っていなくてもトップレベル import が壊れないようにしてあります。
 
-- Use `from wrappy import GMO, BitBank, BitFlyer, CoinCheck` for exchange wrappers
-- Use `from wrappy.lighter import LighterDealer, DealerConfig, WsInfo` for Lighter
-- Use `from wrappy import simple_regression, trades_to_historical` only if the analytics extra is installed
+基本的には次の使い分けで考えると分かりやすいです。
 
-If an optional dependency is missing, `wrappy` raises an explicit install hint instead of failing during the top-level import.
+- 取引所ラッパーを使う:
+  - `from wrappy import GMO, BitBank, BitFlyer, CoinCheck`
+- Lighter を使う:
+  - `from wrappy.lighter import LighterDealer, DealerConfig, WsInfo`
+- 分析関数を使う:
+  - `from wrappy import simple_regression, trades_to_historical`
+  - ただし `analytics` extra が必要
 
-## Config File
+もしオプション依存が足りない状態で該当 API を触ると、`wrappy` は「何を install すべきか」を含んだエラーメッセージを返します。
 
-Create a JSON file such as `config.json`.
+## 設定ファイル
+
+まず `config.json` を用意します。
+
+最小構成の例:
+
+```json
+{
+  "exchange_name": "demo",
+  "bot_name": "sample-bot",
+  "log_level": "INFO",
+  "log_dir": "log"
+}
+```
+
+実運用に近い例:
 
 ```json
 {
@@ -65,15 +106,44 @@ Create a JSON file such as `config.json`.
 }
 ```
 
-Notes:
+各キーの意味:
 
-- `line_notify_token` and `discordWebhook` are optional
-- `statusNotify()` will log a warning and skip notification if neither is configured
-- `bitbank_keys` is optional and only needed for key rotation
+- `exchange_name`
+  - ログファイル名などに使う識別子です。
+- `bot_name`
+  - bot 名です。ログ出力やファイル名に使われます。
+- `log_level`
+  - `DEBUG`, `INFO` などの標準的なログレベルです。
+- `log_dir`
+  - ログファイルの出力先ディレクトリです。
+- `line_notify_token`, `discordWebhook`
+  - 通知先です。どちらも未設定なら通知は送られず、warning ログだけ出ます。
+- `gmocoin`
+  - `GMO` を使うときに必要です。
+- `bitbank` または `bitbank_keys`
+  - `BitBank` を使うときに必要です。`bitbank_keys` は複数 key をローテーションしたいときに使います。
+- `bitflyer`
+  - `BitFlyer` を使うときに必要です。
 
-## Quick Start
+## 何が便利なのか
 
-### Logging and notifications
+このライブラリは「bot ごとに毎回ゼロから API ラッパーや通知まわりを書く」手間を減らすためのものです。
+
+たとえば、普通なら次のような作業を bot ごとに書くことになります。
+
+- 設定ファイルを読み込む
+- logger を初期化する
+- Discord や LINE に稼働通知を送る
+- 各取引所ごとに違う REST API のエンドポイントを叩く
+- 失敗時の例外処理を書く
+
+`wrappy` を使うと、このあたりを共通化した状態から bot ロジックだけに集中できます。
+
+## 使い方の例
+
+### 1. ログと通知だけ使う
+
+これは「取引はまだしないが、bot の起動・停止・例外通知だけ欲しい」というケースです。
 
 ```python
 import asyncio
@@ -90,7 +160,14 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-### GMO limit order
+この例で分かること:
+
+- `BotBase` だけでも logger を使えます。
+- 通知先が未設定でもクラッシュせず、warning だけ出して継続します。
+
+### 2. GMO で指値注文する
+
+たとえば「BTC_JPY に 0.01 の指値売買を出したい」という最小例です。
 
 ```python
 import asyncio
@@ -107,7 +184,34 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-### Lighter
+この例で分かること:
+
+- `GMO("config.json", "BTC_JPY")` のように、設定ファイルと銘柄を渡して使います。
+- 高レベルメソッドは内部で GMO の対応エンドポイントに変換されます。
+
+### 3. BitFlyer で成行注文する
+
+```python
+import asyncio
+from wrappy import BitFlyer
+
+
+async def main():
+    bot = BitFlyer("config.json", "FX_BTC_JPY")
+    result = await bot.market_order("BUY", 0.01)
+    bot.log_info(result)
+
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+この例でのポイント:
+
+- 新しいコードでは `BitFlyer` を使うのを推奨します。
+- 旧来互換として `wrappy.bitflyer` も残していますが、README では `BitFlyer` を正規名として扱います。
+
+### 4. Lighter を使う
 
 ```python
 import asyncio
@@ -129,11 +233,15 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-Lighter-specific details live in [wrappy/Lighter/README.md](wrappy/Lighter/README.md).
+この例でのポイント:
 
-## Public API
+- Lighter は optional 機能です。`lighter-sdk` が必要です。
+- 新しいコードでは `wrappy.lighter` から import してください。
+- Lighter の詳しい説明は [wrappy/Lighter/README.md](wrappy/Lighter/README.md) を参照してください。
 
-Stable exports from `wrappy`:
+## 公開 API
+
+`wrappy` から直接使う公開 API:
 
 - `Log`, `Notify`, `BotBase`
 - `GMO`, `BitBank`, `BitFlyer`, `CoinCheck`
@@ -141,27 +249,53 @@ Stable exports from `wrappy`:
 - `now_jst`, `now_jst_str`, `now_utc`, `now_utc_str`, `now_gmt`, `now_gmt_str`, `fromISOformat`
 - `simple_regression`, `plot_corrcoef`, `np_shift`, `np_stack`, `resample_ohlc`, `df_list`, `trades_to_historical`, `Objective`
 
-Stable exports from `wrappy.lighter`:
+`wrappy.lighter` から使う公開 API:
 
 - `LighterDealer`, `DealerConfig`, `WsInfo`
 - `wrappy.lighter.markets`
 
-## Validation
+## 検証方法
 
-The repository includes smoke tests aimed at package usability:
+AI エージェント運用も含めた基本検証は、次の 1 コマンドで回せます。
 
 ```bash
 python scripts/verify_agent_ready.py
 ```
 
-Convenience alias:
+このコマンドでは次を確認します。
+
+- `wrappy` と `tests/agent` の bytecode compile
+- `tests/agent` 配下の回帰テスト
+- 一時ディレクトリへのローカル install
+- install 後の `import wrappy` と `from wrappy import *`
+
+短い別名コマンドもあります。
 
 ```bash
 make agent-check
 ```
 
-## Known Limits
+## 人間向けの読み方
 
-- Exchange APIs are third-party systems and can still change underneath this package
-- Lighter support requires `lighter-sdk`
-- Analytics helpers require their extra dependencies
+このリポジトリを初めて読むなら、次の順番が分かりやすいです。
+
+1. `README.md`
+2. `config.json` の実例を作る
+3. 自分が使いたい取引所クラスを 1 つ選ぶ
+4. まずは「ログだけ」「通知だけ」「ticker 取得だけ」など小さい例から試す
+5. 問題なければ注文系メソッドに進む
+
+たとえば GMO を使うなら、いきなり複雑な bot ロジックを書くよりも、まずは次の順で確認すると安全です。
+
+1. `GMO("config.json", "BTC_JPY")` が作れる
+2. `bot.log_info("hello")` が出る
+3. `await bot.statusNotify("hello")` が動く
+4. `await bot.fetch_my_position()` のような読み取り系を試す
+5. その後で `market_order()` や `limit_order()` に進む
+
+## 制約と注意点
+
+- 取引所 API は外部サービスなので、将来仕様変更される可能性があります。
+- Lighter を使うには `lighter-sdk` が必要です。
+- 分析関数を使うには `analytics` extra が必要です。
+- README にある例は「入口としての最小例」です。実運用では例外処理、レート制限、ポジション管理を別途検討してください。
