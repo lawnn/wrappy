@@ -102,7 +102,7 @@ pip install lighter-sdk pybotters
 
 ```python
 import asyncio
-from wrappy import LighterDealer, DealerConfig
+from wrappy.lighter import LighterDealer, DealerConfig
 from wrappy.lighter.ws import WsInfo
 
 async def main():

@@ -43,8 +43,8 @@ class BotBase(Notify):
         """
         ボットを起動します.
         """
-        await self._run_logic()
         self.log_info("Bot started.")
+        await self._run_logic()
 
     def stop(self):
         """
@@ -63,7 +63,7 @@ class BotBase(Notify):
         """
         websocketのベースです
         """
-        client.ws_connect(
+        await client.ws_connect(
             url,
             send_json=subscription_commands,
             hdlr_json=store.onmessage)

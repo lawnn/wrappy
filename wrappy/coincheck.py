@@ -18,19 +18,18 @@ class CoinCheck(BotBase):
                 if str(response.status).startswith("429"):
                     self.log_error("429 Too Many Requests")
                     await asyncio.sleep(1)
-                self.statusNotify(f"{response.status} error")
+                await self.statusNotify(f"{response.status} error")
                 raise APIException(response)
             return await response.json()
 
 
     async def fetch_ticker(self):
-        failed_count = 0
-        try:
-            return await self._requests("GET", url="/api/ticker", params={"pair": self.symbol})
-        except Exception as e:
-            failed_count += 1
-            if failed_count > 5:
-                self.log_error("API request failed in fetch ticker")
-                self.log_error(format_exc())
-                raise e
-            await asyncio.sleep(1)
+        for failed_count in range(1, 6):
+            try:
+                return await self._requests("GET", url="/api/ticker", params={"pair": self.symbol})
+            except Exception as e:
+                if failed_count >= 5:
+                    self.log_error("API request failed in fetch ticker")
+                    self.log_error(format_exc())
+                    raise e
+                await asyncio.sleep(1)

@@ -1,14 +1,66 @@
+from __future__ import annotations
+
 import os
-import numpy as np
-import pandas as pd
-import polars as pl
-from datetime import datetime, timedelta
-from matplotlib import pyplot as plt
 from abc import ABCMeta, abstractmethod
+from datetime import datetime, timedelta
+
+try:
+    import numpy as np
+except ModuleNotFoundError:
+    np = None
+
+try:
+    import pandas as pd
+except ModuleNotFoundError:
+    pd = None
+
+try:
+    import polars as pl
+except ModuleNotFoundError:
+    pl = None
+
+plt = None
+
+_NP_NAN = float("nan") if np is None else np.nan
+
+
+def _require_numpy():
+    if np is None:
+        raise ModuleNotFoundError(
+            "This utility requires `numpy`. Install it with `pip install \"wrappy[analytics]\"`."
+        )
+
+
+def _require_pandas():
+    if pd is None:
+        raise ModuleNotFoundError(
+            "This utility requires `pandas`. Install it with `pip install \"wrappy[analytics]\"`."
+        )
+
+
+def _require_polars():
+    if pl is None:
+        raise ModuleNotFoundError(
+            "This utility requires `polars`. Install it with `pip install \"wrappy[analytics]\"`."
+        )
+
+
+def _require_matplotlib():
+    global plt
+    if plt is not None:
+        return
+    try:
+        from matplotlib import pyplot as pyplot
+    except ModuleNotFoundError as exc:
+        raise ModuleNotFoundError(
+            "This utility requires `matplotlib`. Install it with `pip install \"wrappy[analytics]\"`."
+        ) from exc
+    plt = pyplot
 
 
 def simple_regression(x: np.ndarray, y: np.ndarray, plot_graph=False, title: str = "Linear Regression",
                       x_label: str = "x", y_label: str = "y", output_dir: str = None, save_fig: bool = False):
+    _require_numpy()
 
     r2 = np.corrcoef(x, y)[0, 1] ** 2
     if r2 == np.nan:
@@ -16,6 +68,8 @@ def simple_regression(x: np.ndarray, y: np.ndarray, plot_graph=False, title: str
 
     if not plot_graph:
         return r2
+
+    _require_matplotlib()
 
     N = len(x)
     p, cov, _ = np.polyfit(x, y, 1, cov=True)
@@ -71,6 +125,10 @@ def plot_corrcoef(arr1, arr2, output_dir: str = None, title: str = None, x: str 
     :param save_fig: True or False
     :return:
     """
+
+    _require_numpy()
+    _require_pandas()
+    _require_matplotlib()
 
     if output_dir is None:
         output_dir = f'./png/'
@@ -138,7 +196,8 @@ def plot_corrcoef(arr1, arr2, output_dir: str = None, title: str = None, x: str 
 
     plt.show()
 
-def np_shift(arr, num=1, fill_value=np.nan):
+def np_shift(arr, num=1, fill_value=_NP_NAN):
+    _require_numpy()
     result = np.empty_like(arr)
     if num > 0:
         result[:num] = fill_value
@@ -151,11 +210,13 @@ def np_shift(arr, num=1, fill_value=np.nan):
     return result
 
 def np_stack(x,y):
+    _require_numpy()
     z = np.column_stack((x,y))
     z = z[~np.isnan(z).any(axis=1)]
     return z[:,0], z[:,1]
 
 def resample_ohlc(org_df: pd.DataFrame, timeframe):
+    _require_pandas()
     df = org_df.resample(f'{timeframe * 60}S').agg(
         {'open': 'first', 'high': 'max', 'low': 'min', 'close': 'last', 'volume': 'sum'})
     df['close'] = df['close'].fillna(method='ffill')
@@ -176,6 +237,8 @@ def df_list(df: pl.DataFrame, start_date: datetime, interval: int, quantity: int
     Returns:
         list: _description_
     """
+    _require_polars()
+
     # 日付リストを生成する
     date_list = [start_date + timedelta(days=interval*i)
                 for i in range(quantity)
@@ -188,6 +251,9 @@ def df_list(df: pl.DataFrame, start_date: datetime, interval: int, quantity: int
                     if len(date_list) % interval != 1 else [])]
 
 def trades_to_historical(df: pd.DataFrame, period: str = '1S'):
+    _require_numpy()
+    _require_pandas()
+
     if 'side' in df.columns:
         df['side'] = df['side'].mask(df['side'] == 'Buy', 'buy')
         df['side'] = df['side'].mask(df['side'] == 'BUY', 'buy')

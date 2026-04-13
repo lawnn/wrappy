@@ -129,7 +129,9 @@ dmypy.json
 .pyre/
 
 # User setting
-tests/
+tests/*
+!tests/agent/
+!tests/agent/**
 .idea/
 apis.json
 

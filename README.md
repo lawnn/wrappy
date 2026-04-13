@@ -1,133 +1,158 @@
 # wrappy
-For crypto currency botter.     
-## What is it?
-仮想通貨のbot作成にかかる手間をこのライブラリに集約するために作りました.      
-基本機能はlog出力 discord or LINE通知 指値など取引所への注文です.     
-(GMOは口座作っただけで特にテストしてません)
-## インストール方法
-```
+
+`wrappy` is an async helper library for crypto trading bots.
+
+The repository currently supports:
+
+- Common bot infrastructure: `Log`, `Notify`, `BotBase`
+- Exchange wrappers: `GMO`, `BitBank`, `BitFlyer`, `CoinCheck`
+- Optional Lighter integration: `wrappy.lighter`
+- Optional analytics helpers in `wrappy.util`
+
+This README is intentionally narrow: it documents only the APIs that exist in this repository today.
+
+## Installation
+
+Core package:
+
+```bash
 pip install -U git+https://github.com/lawnn/wrappy.git
 ```
-## 事前準備
-適当な場所にconfig.jsonファイルを作成する。       
-excange_name, bot_name, log_level, discordWebhookは任意で記入      
-それ以外は必須です。
+
+With Lighter support:
+
+```bash
+pip install -U "wrappy[lighter] @ git+https://github.com/lawnn/wrappy.git"
 ```
+
+With analytics helpers:
+
+```bash
+pip install -U "wrappy[analytics] @ git+https://github.com/lawnn/wrappy.git"
+```
+
+## Agent-Friendly Import Rules
+
+The package is designed so that `import wrappy` works even if optional dependencies are not installed.
+
+- Use `from wrappy import GMO, BitBank, BitFlyer, CoinCheck` for exchange wrappers
+- Use `from wrappy.lighter import LighterDealer, DealerConfig, WsInfo` for Lighter
+- Use `from wrappy import simple_regression, trades_to_historical` only if the analytics extra is installed
+
+If an optional dependency is missing, `wrappy` raises an explicit install hint instead of failing during the top-level import.
+
+## Config File
+
+Create a JSON file such as `config.json`.
+
+```json
 {
-  "exchange_name" : "exchange", # 取引所の名前
-  "bot_name" : "bot",   # botの名前
-  "log_level" : "DEBUG",    # logレベル
-  "line_notify_token" : "", # LINE token
-  "discordWebhook" : "",    # discord
-  "ftx": ["API_KEY","API_SECRET"],
-  "bybit": ["API_KEY", "API_SECRET"],
-  "gmocoin": ["API_KEY", "API_SECRET"]
+  "exchange_name": "gmo",
+  "bot_name": "sample-bot",
+  "log_level": "INFO",
+  "log_dir": "log",
+  "line_notify_token": "",
+  "discordWebhook": "",
+  "gmocoin": ["API_KEY", "API_SECRET"],
+  "bitbank": ["API_KEY", "API_SECRET"],
+  "bitbank_keys": [
+    ["API_KEY", "API_SECRET"]
+  ],
+  "bitflyer": ["API_KEY", "API_SECRET"]
 }
 ```
 
-## 導入方法
-```
-from wrappy import GMO
-bot = GMO('上で作ったjsonファイルがある場所', market_name)
-```     
-## 基本機能紹介(base.py)
-```
-# log error出力
-log_error('ここに何か書く')
-# log warning出力
-log_warning('ここに何か書く') 
-# log info出力
-log_info('ここに何か書く')
-# log debug出力
-log_debug('ここに何か書く')
-# discordかlineに通知
-statusNotify('ここに何か書く')
-```
-## 使用例1(log,Notify出力)     
-```buildoutcfg
+Notes:
+
+- `line_notify_token` and `discordWebhook` are optional
+- `statusNotify()` will log a warning and skip notification if neither is configured
+- `bitbank_keys` is optional and only needed for key rotation
+
+## Quick Start
+
+### Logging and notifications
+
+```python
 import asyncio
-import os
 from wrappy import BotBase
 
 
-async def main(configPath):
-    bot = BotBase(configPath)
-    bot.log_error('error')
-    bot.log_warning('warning')
-    bot.log_debug('debug')
-    bot.log_info('info')
-    bot.statusNotify('notify test')
+async def main():
+    bot = BotBase("config.json")
+    bot.log_info("starting")
+    await bot.statusNotify("bot started")
 
-if __name__ == '__main__':
-    try:
-        if os.name == 'nt':
-            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        asyncio.run(main('config.json'))
-    except KeyboardInterrupt:
-        pass
+
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
-## 使用例2(GMOの場合)      
-100BTCで0.001lotの買い指値        
-config.jsonは同じディレクトリに置いた場合のコード
-```buildoutcfg
+
+### GMO limit order
+
+```python
 import asyncio
-import os
 from wrappy import GMO
 
 
-async def main(configPath, symbol):
-    bot = GMO(configPath, symbol)
-    bot.log_info('starting bot...')
-    
-    # 100BTCで0.001lotの買い指値
-    r = await bot.limit('buy', 0.001, 100)
-    bot.log_info(r)
+async def main():
+    bot = GMO("config.json", "BTC_JPY")
+    result = await bot.limit_order("BUY", 0.01, 100)
+    bot.log_info(result)
 
 
-if __name__ == '__main__':
-    try:
-        # windowsで使う場合のおまじない.
-        if os.name == 'nt':
-            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        #　mainの実行
-        asyncio.run(main('config.json', 'BTC_JPY'))
-    except KeyboardInterrupt:
-        pass
-
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
-## 使用例3(csv読み書き)
 
-```buildoutcfg
+### Lighter
+
+```python
 import asyncio
-import os
-from wrappy import History
+from wrappy.lighter import LighterDealer, WsInfo
 
 
-async def main(configPath):
-    columns = {
-        "order_no": "オーダーNo.",
-        "order_id": "オーダーID",
-        "timestamp": "オーダー時刻",
-        "order_kind": "オーダー種別",
-        "size": "実際にオーダーしたサイズ",
-        "price": "実際にオーダーした価格(=ベスト価格+3種類の幅)",
-        "current_position": "現在ポジション"
-    }
-    hist = History(configPath, columns)
-    order_history = {"order_no": 1, "timestamp": 12,
-                     "order_kind": 2, "size": 0.3, "price": 5000,
-                     "current_position": 5430
-                     }
-    hist.write_order_history(order_history)
+async def main():
+    ws = await WsInfo.run_overlay_from_config("config.json", overrides={"symbol": "ETH"})
+    dealer = await LighterDealer.from_config("config.json", symbol="ETH")
+
+    async with dealer:
+        order = await dealer.create_limit_order(price=3000.0, size=0.005)
+        print(order)
+
+    await ws.aclose()
 
 
-if __name__ == '__main__':
-    try:
-        if os.name == 'nt':
-            asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-        asyncio.run(main('config.json'))
-    except KeyboardInterrupt:
-        pass
+if __name__ == "__main__":
+    asyncio.run(main())
 ```
-## Special thanks   
-[Pybotters](https://github.com/MtkN1/pybotters)
+
+Lighter-specific details live in [wrappy/Lighter/README.md](wrappy/Lighter/README.md).
+
+## Public API
+
+Stable exports from `wrappy`:
+
+- `Log`, `Notify`, `BotBase`
+- `GMO`, `BitBank`, `BitFlyer`, `CoinCheck`
+- `APIException`, `RequestException`
+- `now_jst`, `now_jst_str`, `now_utc`, `now_utc_str`, `now_gmt`, `now_gmt_str`, `fromISOformat`
+- `simple_regression`, `plot_corrcoef`, `np_shift`, `np_stack`, `resample_ohlc`, `df_list`, `trades_to_historical`, `Objective`
+
+Stable exports from `wrappy.lighter`:
+
+- `LighterDealer`, `DealerConfig`, `WsInfo`
+- `wrappy.lighter.markets`
+
+## Validation
+
+The repository includes smoke tests aimed at package usability:
+
+```bash
+python -m unittest discover -s tests/agent -v
+```
+
+## Known Limits
+
+- Exchange APIs are third-party systems and can still change underneath this package
+- Lighter support requires `lighter-sdk`
+- Analytics helpers require their extra dependencies

@@ -1,13 +1,14 @@
 import json
-import sys
-import os
 import logging
+import os
+import sys
 from logging.handlers import RotatingFileHandler
 
 class Log(object):
     def __init__(self, path):
         try:
-            self.apis = self.config = json.load(open(path, 'r', encoding="utf-8"))
+            with open(path, 'r', encoding="utf-8") as fh:
+                self.apis = self.config = json.load(fh)
         except FileNotFoundError as e:
             print("[ERROR] Config file is not found.", file=sys.stderr)
             raise e
@@ -33,6 +34,7 @@ class Log(object):
             self.log_dir = self.config["log_dir"]
         except KeyError:
             self.log_dir = 'log'
+        self._initialize_logger()
 
     def _initialize_logger(self):
         """
@@ -41,7 +43,8 @@ class Log(object):
         if not self.logger:
             self.logger = logging.getLogger(f"{self.exchange_name}_{self.bot_name}")
             self.logger.setLevel(self.log_level)
-            if not self.logger.hasHandlers():
+            self.logger.propagate = False
+            if not self.logger.handlers:
                 stream_formatter = logging.Formatter(fmt="[%(levelname)s] %(asctime)s : %(message)s",
                                                      datefmt="%Y-%m-%d %H:%M:%S")
                 stream_handler = logging.StreamHandler()
@@ -50,8 +53,7 @@ class Log(object):
                 self.logger.addHandler(stream_handler)
                 if self.log_dir:
                     # コンフィグファイルでログディレクトリが指定されていた場合、ファイルにも出力します.
-                    if not os.path.exists(self.log_dir):
-                        os.mkdir(self.log_dir)
+                    os.makedirs(self.log_dir, exist_ok=True)
                     file_formatter = logging.Formatter(fmt="[%(levelname)s] %(asctime)s %(module)s: %(message)s",
                                                        datefmt="%Y-%m-%d %H:%M:%S")
                     file_handler = RotatingFileHandler(

@@ -94,7 +94,7 @@ class BitBank(BotBase):
             if not str(response.status).startswith('2'):
                 if str(response.status).startswith("429"):
                     raise RequestException(f"429 Too Many Requests")
-                self.statusNotify(f"Status {response.status} Error")
+                await self.statusNotify(f"Status {response.status} Error")
                 raise APIException(response)
             data = await response.json()
 
